@@ -1,13 +1,15 @@
 // ConsoleApplication1.cpp
-
-
-#include "stdafx.h"
+// use monte carlo to calculate pi
 /** simple program to test the MPI stuff to see if it works **/
 /** includes **/
+#include "stdafx.h"
 #include <iostream>
 #include <mpi.h>
-#include <stdlib.h>     /* srand */
-#include <ctime>
+#include <stdlib.h>    
+#include <random>
+#include <chrono>
+
+int world_rank;
 
 double fRand(double fMin, double fMax)
 {
@@ -23,10 +25,21 @@ int calculateHits(int iterations)
 	double z = 0;
 	int i = 0;
 	int hits = 0;
+
+	// random 
+	std::mt19937_64 rng;
+	// init the random generator with seed
+	uint64_t timeSeed = std::chrono::high_resolution_clock::now().time_since_epoch().count()*world_rank;
+	std::seed_seq ss{ uint32_t(timeSeed & 0xffffffff), uint32_t(timeSeed >> 32) };
+	rng.seed(ss);
+	// initialize a uniform distribution between 0 and 1
+	std::uniform_real_distribution<double> unif(-1, 1);
+
 	for (i = 0; i<iterations; i++) 
 	{
-		x = fRand(-1.0, 1.0);
-		y = fRand(-1.0, 1.0);
+		
+		x = unif(rng);
+		y = unif(rng);
 		z = x*x + y*y;
 		if (z <= 1)
 		{
@@ -53,15 +66,12 @@ void coordinator(int iterations, int world_size)
 	}
 
 	// calculate pi
-	pi = (double) total_hits / (iterations * world_size)* 4;
+	pi = (double) total_hits * 4 / (iterations * world_size);
+	
 	// output result
 	std::cout.precision(15);
 	std::cout.setf(std::ios::fixed, std::ios::floatfield); // floatfield set to fixed
-	std::cout << "calc PI: " << pi << std::endl;
-	std::cout << "real PI: 3.14159265359" << std::endl;
-	double real_pi = 3.14159265359;
-	double sub = real_pi - pi;
-	std::cout << "difference: " << sub << std::endl;
+	std::cout << "PI ~ "<< pi << std::endl; 
 	
 }
 
@@ -80,7 +90,7 @@ int main(int argc, char** argv)
 	MPI_Init(NULL, NULL);
 	int iterations = 0;
 	int world_size;
-	int world_rank;
+
 
 	MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
@@ -88,19 +98,21 @@ int main(int argc, char** argv)
 	/* get the number of iterations*/
 	sscanf_s(argv[1], "%d", &iterations); 
 
-	/* init seed for rand */
-
-	srand(143452579123 * time(NULL) * world_rank);
-
+	
 	// master node 
 	if(world_rank == 0) 
 	{
-		coordinator(iterations, world_size);
+		auto start_time = MPI_Wtime();
+		coordinator(iterations/world_size, world_size);
+		auto end_time = MPI_Wtime();
+		// output the time
+		std::cout << "time in s:" << end_time-start_time << std::endl;
+
 	}
 	// other nodes
 	else
 	{
-		participant(iterations);
+		participant(iterations/world_size);
 	}
 
 	MPI_Finalize();
